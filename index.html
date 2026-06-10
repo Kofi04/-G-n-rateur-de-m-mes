@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title> Générateur de mèmes</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-text">Générateur<span> de mèmes</span></div>
+  </div>
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('editor', this)">Éditeur</button>
+    <button class="tab" onclick="switchTab('gallery', this)">
+      Galerie &nbsp;<span class="gallery-pill" id="cnt" style="font-size:10px;padding:2px 8px;">0</span>
+    </button>
+  </div>
+</header>
+
+<main>
+  <div class="panel active" id="panel-editor">
+    <div id="upload-section">
+      <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div class="upload-circle">📁</div>
+        <h2>Glissez une image ici</h2>
+        <p>PNG, JPG, GIF — max 10 Mo</p>
+        <button class="btn-upload" onclick="event.stopPropagation(); document.getElementById('file-input').click()">
+          📂 Choisir un fichier
+        </button>
+      </div>
+      <input type="file" id="file-input" accept="image/*">
+    </div>
+
+    <div class="editor-grid" id="editor-section" style="display:none">
+      <div class="canvas-wrap">
+        <canvas id="meme-canvas"></canvas>
+        
+        <div class="toast" id="toast">✅ Sauvegardé !</div>
+      </div>
+
+      <div class="sidebar">
+        <div class="card">
+          <div class="card-head"><span>Textes</span></div>
+          <div class="card-body">
+            <div>
+              <label>Texte du haut</label>
+              <input type="text" id="top-text" placeholder="TEXTE DU HAUT" oninput="render()">
+            </div>
+            <div>
+              <label>Texte du bas</label>
+              <input type="text" id="bottom-text" placeholder="TEXTE DU BAS" oninput="render()">
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span>Style</span></div>
+          <div class="card-body">
+            <div>
+              <label>Taille de police</label>
+              <div class="range-row">
+                <input type="range" id="font-size" min="16" max="72" value="36" step="1"
+                  oninput="document.getElementById('fsv').textContent=this.value;render()">
+                <span class="range-val" id="fsv">36</span>
+              </div>
+            </div>
+            <div>
+              <label>Police</label>
+              <select id="font-family" onchange="render()">
+                <option value="Impact">Impact</option>
+                <option value="Arial Black">Arial Black</option>
+                <option value="Comic Sans MS">Comic Sans MS</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Courier New">Courier New</option>
+              </select>
+            </div>
+            <div class="color-row">
+              <div class="color-field">
+                <label>Couleur texte</label>
+                <input type="color" id="text-color" value="#ffffff" oninput="render()">
+              </div>
+              <div class="color-field">
+                <label>Contour</label>
+                <input type="color" id="stroke-color" value="#000000" oninput="render()">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span>Position</span></div>
+          <div class="card-body">
+            <div class="pos-grid">
+              <div class="pos-btn on" id="pos-top" onclick="setPos('top',this)">Haut</div>
+              <div class="pos-btn on" id="pos-bottom" onclick="setPos('bottom',this)">Bas</div>
+              <div class="pos-btn" id="pos-center" onclick="setPos('center',this)">Centre</div>
+              <div class="pos-btn" id="pos-split" onclick="setPos('split',this)">Séparé</div>
+            </div>
+            <p style="font-size:11px;color:var(--muted);margin-top:2px;">Ou glissez directement le texte sur l'image</p>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn-primary" onclick="saveMeme()">💾 Sauvegarder dans la galerie</button>
+          <div class="btn-row">
+            <button class="btn-secondary" onclick="downloadMeme()">⬇️ Télécharger</button>
+            <button class="btn-secondary" onclick="resetEditor()">Nouveau</button>
+          </div>
+          <div class="share-row">
+            <button class="btn-secondary btn-twitter" onclick="shareMeme('twitter')"> Twitter</button>
+            <button class="btn-secondary btn-facebook" onclick="shareMeme('facebook')">Facebook</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-gallery">
+    <div class="gallery-header">
+      <h2>Mes mèmes</h2>
+      <span class="gallery-pill" id="cnt2">0 mème(s)</span>
+    </div>
+    <div class="gallery-grid" id="gallery-grid"></div>
+  </div>
+</main>
+
+
+
+<script>
+let currentImage = null, gallery = [], posMode = 'split';
+try { gallery = JSON.parse(localStorage.getItem('memes') || '[]'); } catch(e) {}
+
+// Positions des textes (en ratio 0-1 par rapport au canvas)
+let topPos = { x: 0.5, y: 0.08 };
+let bottomPos = { x: 0.5, y: 0.92 };
+
+// Drag state
+let dragging = null; // 'top' | 'bottom' | null
+let dragOffsetX = 0, dragOffsetY = 0;
+let hintHidden = false;
+
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('active');
+  if (tab === 'gallery') renderGallery();
+}
+
+function setPos(mode, el) {
+  posMode = mode;
+  document.querySelectorAll('.pos-btn').forEach(b => b.classList.remove('on'));
+  el.classList.add('on');
+  // Reset positions selon le mode
+  if (mode === 'top') { topPos = { x: 0.5, y: 0.08 }; }
+  else if (mode === 'bottom') { bottomPos = { x: 0.5, y: 0.92 }; }
+  else if (mode === 'center') { topPos = { x: 0.5, y: 0.45 }; bottomPos = { x: 0.5, y: 0.58 }; }
+  else if (mode === 'split') { topPos = { x: 0.5, y: 0.08 }; bottomPos = { x: 0.5, y: 0.92 }; }
+  render();
+}
+
+function getCanvasCoords(e) {
+  const canvas = document.getElementById('meme-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY
+  };
+}
+
+function getTextHitRadius(canvas) {
+  const fontSize = parseInt(document.getElementById('font-size').value);
+  return fontSize * 1.2;
+}
+
+function isNearText(cx, cy, pos, canvas) {
+  const tx = pos.x * canvas.width;
+  const ty = pos.y * canvas.height;
+  const r = getTextHitRadius(canvas);
+  return Math.abs(cx - tx) < canvas.width * 0.45 && Math.abs(cy - ty) < r;
+}
+
+// MOUSE EVENTS
+const canvasEl = document.getElementById('meme-canvas');
+
+canvasEl.addEventListener('mousemove', e => {
+  if (!currentImage) return;
+  if (dragging) {
+    const coords = getCanvasCoords(e);
+    const canvas = canvasEl;
+    const nx = (coords.x - dragOffsetX) / canvas.width;
+    const ny = (coords.y - dragOffsetY) / canvas.height;
+    if (dragging === 'top') topPos = { x: Math.max(0.05, Math.min(0.95, nx)), y: Math.max(0.03, Math.min(0.97, ny)) };
+    if (dragging === 'bottom') bottomPos = { x: Math.max(0.05, Math.min(0.95, nx)), y: Math.max(0.03, Math.min(0.97, ny)) };
+    render();
+    return;
+  }
+  const coords = getCanvasCoords(e);
+  const canvas = canvasEl;
+  const topText = document.getElementById('top-text').value;
+  const bottomText = document.getElementById('bottom-text').value;
+  const nearTop = topText && (posMode === 'top' || posMode === 'split' || posMode === 'center') && isNearText(coords.x, coords.y, topPos, canvas);
+  const nearBottom = bottomText && (posMode === 'bottom' || posMode === 'split' || posMode === 'center') && isNearText(coords.x, coords.y, bottomPos, canvas);
+  canvas.className = nearTop ? 'hover-top' : nearBottom ? 'hover-bottom' : '';
+});
+
+canvasEl.addEventListener('mousedown', e => {
+  if (!currentImage) return;
+  const coords = getCanvasCoords(e);
+  const canvas = canvasEl;
+  const topText = document.getElementById('top-text').value;
+  const bottomText = document.getElementById('bottom-text').value;
+  const nearTop = topText && (posMode === 'top' || posMode === 'split' || posMode === 'center') && isNearText(coords.x, coords.y, topPos, canvas);
+  const nearBottom = bottomText && (posMode === 'bottom' || posMode === 'split' || posMode === 'center') && isNearText(coords.x, coords.y, bottomPos, canvas);
+  if (nearTop) {
+    dragging = 'top';
+    dragOffsetX = coords.x - topPos.x * canvas.width;
+    dragOffsetY = coords.y - topPos.y * canvas.height;
+    canvas.classList.add('dragging');
+  } else if (nearBottom) {
+    dragging = 'bottom';
+    dragOffsetX = coords.x - bottomPos.x * canvas.width;
+    dragOffsetY = coords.y - bottomPos.y * canvas.height;
+    canvas.classList.add('dragging');
+  }
+  if (dragging && !hintHidden) {
+    hintHidden = true;
+    document.getElementById('drag-hint').classList.add('hidden');
+  }
+  e.preventDefault();
+});
+
+document.addEventListener('mouseup', () => {
+  dragging = null;
+  canvasEl.classList.remove('dragging');
+  canvasEl.className = '';
+});
+
+// TOUCH EVENTS
+canvasEl.addEventListener('touchstart', e => {
+  if (!currentImage) return;
+  const coords = getCanvasCoords(e);
+  const canvas = canvasEl;
+  const topText = document.getElementById('top-text').value;
+  const bottomText = document.getElementById('bottom-text').value;
+  const nearTop = topText && (posMode === 'top' || posMode === 'split' || posMode === 'center') && isNearText(coords.x, coords.y, topPos, canvas);
+  const nearBottom = bottomText && (posMode === 'bottom' || posMode === 'split' || posMode === 'center') && isNearText(coords.x, coords.y, bottomPos, canvas);
+  if (nearTop) { dragging = 'top'; dragOffsetX = coords.x - topPos.x * canvas.width; dragOffsetY = coords.y - topPos.y * canvas.height; }
+  else if (nearBottom) { dragging = 'bottom'; dragOffsetX = coords.x - bottomPos.x * canvas.width; dragOffsetY = coords.y - bottomPos.y * canvas.height; }
+  if (dragging) e.preventDefault();
+}, { passive: false });
+
+canvasEl.addEventListener('touchmove', e => {
+  if (!dragging) return;
+  const coords = getCanvasCoords(e);
+  const canvas = canvasEl;
+  const nx = (coords.x - dragOffsetX) / canvas.width;
+  const ny = (coords.y - dragOffsetY) / canvas.height;
+  if (dragging === 'top') topPos = { x: Math.max(0.05, Math.min(0.95, nx)), y: Math.max(0.03, Math.min(0.97, ny)) };
+  if (dragging === 'bottom') bottomPos = { x: Math.max(0.05, Math.min(0.95, nx)), y: Math.max(0.03, Math.min(0.97, ny)) };
+  render();
+  e.preventDefault();
+}, { passive: false });
+
+canvasEl.addEventListener('touchend', () => { dragging = null; });
+
+document.getElementById('file-input').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    currentImage = new Image();
+    currentImage.src = ev.target.result;
+    currentImage.onload = () => { showEditor(); render(); };
+  };
+  r.readAsDataURL(f);
+};
+
+const dz = document.getElementById('drop-zone');
+dz.ondragover = e => { e.preventDefault(); dz.classList.add('drag-over'); };
+dz.ondragleave = () => dz.classList.remove('drag-over');
+dz.ondrop = e => {
+  e.preventDefault(); dz.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (!f || !f.type.startsWith('image/')) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    currentImage = new Image();
+    currentImage.src = ev.target.result;
+    currentImage.onload = () => { showEditor(); render(); };
+  };
+  r.readAsDataURL(f);
+};
+
+function showEditor() {
+  document.getElementById('upload-section').style.display = 'none';
+  document.getElementById('editor-section').style.display = 'grid';
+  // Reset positions
+  topPos = { x: 0.5, y: 0.08 };
+  bottomPos = { x: 0.5, y: 0.92 };
+}
+
+function drawText(ctx, text, posRatio, canvas, fontSize, textColor, strokeColor, fontFamily) {
+  if (!text) return;
+  ctx.font = `${fontSize}px "${fontFamily}"`;
+  ctx.fillStyle = textColor;
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = Math.max(2, fontSize / 10);
+  ctx.textAlign = 'center';
+  ctx.lineJoin = 'round';
+  const x = posRatio.x * canvas.width;
+  const y = posRatio.y * canvas.height;
+  ctx.strokeText(text, x, y);
+  ctx.fillText(text, x, y);
+  // Indicateur visuel de drag (petit cercle si pas en train de drag)
+  if (!dragging) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(124,92,191,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(x, y - fontSize * 0.3, fontSize * 0.6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function render() {
+  if (!currentImage) return;
+  const canvas = document.getElementById('meme-canvas');
+  const ctx = canvas.getContext('2d');
+  const ratio = Math.min(500 / currentImage.width, 380 / currentImage.height);
+  canvas.width = Math.round(currentImage.width * ratio);
+  canvas.height = Math.round(currentImage.height * ratio);
+  ctx.drawImage(currentImage, 0, 0, canvas.width, canvas.height);
+
+  const topText = document.getElementById('top-text').value.toUpperCase();
+  const bottomText = document.getElementById('bottom-text').value.toUpperCase();
+  const fontSize = parseInt(document.getElementById('font-size').value);
+  const textColor = document.getElementById('text-color').value;
+  const strokeColor = document.getElementById('stroke-color').value;
+  const fontFamily = document.getElementById('font-family').value;
+
+  if (posMode === 'top' || posMode === 'split') drawText(ctx, topText, topPos, canvas, fontSize, textColor, strokeColor, fontFamily);
+  if (posMode === 'bottom' || posMode === 'split') drawText(ctx, bottomText, bottomPos, canvas, fontSize, textColor, strokeColor, fontFamily);
+  if (posMode === 'center') {
+    drawText(ctx, topText, topPos, canvas, fontSize, textColor, strokeColor, fontFamily);
+    drawText(ctx, bottomText, bottomPos, canvas, fontSize, textColor, strokeColor, fontFamily);
+  }
+}
+
+function renderClean() {
+  // Render sans les indicateurs de drag (pour export)
+  if (!currentImage) return;
+  const canvas = document.getElementById('meme-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(currentImage, 0, 0, canvas.width, canvas.height);
+  const topText = document.getElementById('top-text').value.toUpperCase();
+  const bottomText = document.getElementById('bottom-text').value.toUpperCase();
+  const fontSize = parseInt(document.getElementById('font-size').value);
+  const textColor = document.getElementById('text-color').value;
+  const strokeColor = document.getElementById('stroke-color').value;
+  const fontFamily = document.getElementById('font-family').value;
+  function dt(text, pos) {
+    if (!text) return;
+    ctx.font = `${fontSize}px "${fontFamily}"`;
+    ctx.fillStyle = textColor; ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = Math.max(2, fontSize / 10);
+    ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+    ctx.strokeText(text, pos.x * canvas.width, pos.y * canvas.height);
+    ctx.fillText(text, pos.x * canvas.width, pos.y * canvas.height);
+  }
+  if (posMode === 'top' || posMode === 'split') dt(topText, topPos);
+  if (posMode === 'bottom' || posMode === 'split') dt(bottomText, bottomPos);
+  if (posMode === 'center') { dt(topText, topPos); dt(bottomText, bottomPos); }
+}
+
+function saveMeme() {
+  renderClean();
+  const canvas = document.getElementById('meme-canvas');
+  const topText = document.getElementById('top-text').value || 'Mème';
+  gallery.unshift({ id: Date.now(), data: canvas.toDataURL('image/png'), title: topText, date: new Date().toLocaleDateString('fr-FR') });
+  if (gallery.length > 20) gallery.pop();
+  try { localStorage.setItem('memes', JSON.stringify(gallery)); } catch(e) {}
+  updateCount();
+  render(); // Remettre les indicateurs
+  const t = document.getElementById('toast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+function downloadMeme() {
+  renderClean();
+  const a = document.createElement('a');
+  a.download = 'meme-' + Date.now() + '.png';
+  a.href = document.getElementById('meme-canvas').toDataURL('image/png');
+  a.click();
+  render();
+}
+
+function shareMeme(p) {
+  const txt = encodeURIComponent('Mon mème créé avec le Générateur de Mèmes !');
+  const urls = { twitter: `https://twitter.com/intent/tweet?text=${txt}`, facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}` };
+  window.open(urls[p], '_blank', 'width=600,height=400');
+}
+
+function resetEditor() {
+  currentImage = null;
+  document.getElementById('upload-section').style.display = 'block';
+  document.getElementById('editor-section').style.display = 'none';
+  document.getElementById('top-text').value = '';
+  document.getElementById('bottom-text').value = '';
+  document.getElementById('file-input').value = '';
+  hintHidden = false;
+  document.getElementById('drag-hint').classList.remove('hidden');
+}
+
+function renderGallery() {
+  const grid = document.getElementById('gallery-grid');
+  if (!gallery.length) {
+    grid.innerHTML = '<div class="empty"><div class="empty-icon"></div><h3>Aucun mème sauvegardé</h3><p>Créez votre premier mème dans l\'éditeur</p></div>';
+    return;
+  }
+  grid.innerHTML = gallery.map((m, i) => `
+    <div class="gal-card">
+      <img src="${m.data}" alt="${m.title}" onclick="loadFromGallery(${i})" title="Recharger dans l'éditeur">
+      <div class="gal-footer">
+        <div class="gal-title">${m.title}</div>
+        <div class="gal-meta">
+          <span class="gal-date">${m.date}</span>
+          <div class="gal-btns">
+            <button class="gal-btn" onclick="downloadFromGallery(${i})">⬇️</button>
+            <button class="gal-btn del" onclick="deleteFromGallery(${i})">🗑️</button>
+          </div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function loadFromGallery(i) {
+  currentImage = new Image();
+  currentImage.src = gallery[i].data;
+  currentImage.onload = () => {
+    document.querySelectorAll('.tab').forEach((t, idx) => t.classList.toggle('active', idx === 0));
+    document.querySelectorAll('.panel').forEach((p, idx) => p.classList.toggle('active', idx === 0));
+    showEditor(); render();
+  };
+}
+
+function downloadFromGallery(i) {
+  const a = document.createElement('a'); a.download = 'meme-' + i + '.png'; a.href = gallery[i].data; a.click();
+}
+
+function deleteFromGallery(i) {
+  gallery.splice(i, 1);
+  try { localStorage.setItem('memes', JSON.stringify(gallery)); } catch(e) {}
+  updateCount(); renderGallery();
+}
+
+function updateCount() {
+  document.getElementById('cnt').textContent = gallery.length;
+  document.getElementById('cnt2').textContent = gallery.length + ' mème(s)';
+}
+
+updateCount();
+</script>
+</body>
+</html>
